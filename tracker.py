@@ -1,5 +1,5 @@
 """
-Main code to run gesture tracking and recognition.
+Includes demos of gesture tracking and recognition as required in video.
 """
 import cv2
 import numpy as np
@@ -15,7 +15,7 @@ def imshow_smaller(title, img, scale=0.75):
     img_small = resize(img, scale=scale)
     cv2.imshow(title, img_small)
 
-def add_text(img, text, scale=1):
+def add_text_top_left(img, text, scale=1):
     cv2.putText(img, text, (50, 50), cv2.FONT_HERSHEY_COMPLEX, scale, [max_color,0,max_color], thickness=3)
 
 def hsv_and_ycrcb_mask(frame):
@@ -27,7 +27,7 @@ def hsv_and_ycrcb_mask(frame):
 
     lower_YCrCb = np.array([0, 138, 67], dtype = "uint8")
     upper_YCrCb = np.array((255, 173, 133), dtype = "uint8")
-        
+    
     converted_YCrCb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb)
     skin_mask_YCrCb = cv2.inRange(converted_YCrCb, lower_YCrCb, upper_YCrCb)
     
@@ -75,6 +75,7 @@ def find_and_show_hand_countour(binary_frame):
         subimg = cv2.cvtColor(subimg, cv2.COLOR_BGR2GRAY)
         contours, _ = cv2.findContours(subimg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         max_contour = max(contours, key=len)
+        cv2.fillPoly(frame, pts=[max_contour], color=[255,200,100]) # Fill largest contour with light blue.
         if len(max_contour) >= 5:
             ellipseParam = cv2.fitEllipse(max_contour)
             subimg = cv2.cvtColor(subimg, cv2.COLOR_GRAY2RGB)
@@ -83,10 +84,10 @@ def find_and_show_hand_countour(binary_frame):
         subimg = cv2.resize(subimg, (0,0), fx=3, fy=3)
         (x,y), (MA,ma), angle = cv2.fitEllipse(max_contour)
         x, y, MA, ma, angle = round(x, 2), round(y, 2), round(MA, 2), round(ma, 2), round(angle, 2)
-        add_text(frame, f"({x}, {y}); axes {MA}, {ma}; angle {angle}")
+        add_text_top_left(frame, f"({x}, {y}); axes {MA}, {ma}; angle {angle}")
         imshow_smaller("ROI 2", subimg)
     except:
-        add_text(frame, "No hand found")
+        add_text_top_left(frame, "No hand found")
     return frame
 
 def add_convex_hull(binary_frame):
@@ -97,7 +98,9 @@ def add_convex_hull(binary_frame):
     largest_contour = contours[0]
     hull = cv2.convexHull(largest_contour, returnPoints = False)
     frame = cv2.cvtColor(binary_frame, cv2.COLOR_GRAY2RGB) # Convert back to color
-    # cv2.fillPoly(frame, pts=[largest_contour], color=[255,200,100]) # Fill contour with light blue.
+    cv2.fillPoly(frame, pts=[largest_contour], color=[255,200,100]) # Fill largest contour with light blue.
+    # Unless there are no fingers, the actual number is + 1 since we count valleys not fingers.
+    finger_count = 1
     for cnt in contours[:1]:
         try:
             defects = cv2.convexityDefects(cnt, hull)
@@ -109,14 +112,26 @@ def add_convex_hull(binary_frame):
                     far = tuple(cnt[f][0])
 
                     cv2.line(frame, start, end, [0,max_color,0], 2) # Green convex hull.
-                    cv2.circle(frame, far, 5, [0,0,max_color], -1) # Red points.
+                    cv2.circle(frame, far, 5, [0,200,max_color], -1) # Orange points.
+
+                    if is_finger(start, end, far):
+                        finger_count += 1
+                        cv2.circle(frame, far, 4, [0,0,max_color], -1) # Red finger valley.
+
         except cv2.error:
             pass
     M = cv2.moments(largest_contour)
     cX = int(M["m10"] / M["m00"])
     cY = int(M["m01"] / M["m00"])
-    add_text(frame, f"({cX}, {cY})")
+    add_text_top_left(frame, f"({cX}, {cY}); {finger_count} fingers")
     return frame
+
+def is_finger(start, end, far):
+    c_squared = (end[0] - start[0])**2 + (end[1] - start[1])**2
+    a_squared = (far[0] - start[0])**2 + (far[1] - start[1])**2
+    b_squared = (end[0] - far[0])**2 + (end[1] - far[1])**2
+    angle = np.arccos((a_squared + b_squared  - c_squared ) / (2 * np.sqrt(a_squared * b_squared)))
+    return angle <= np.pi / 3
 
 
 window_name = "Hand Gesture Tracking"
