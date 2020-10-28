@@ -1,0 +1,7 @@
+# data
+*_data/
+
+# settings files
+__pycache__
+.DS_Store
+.vscode
