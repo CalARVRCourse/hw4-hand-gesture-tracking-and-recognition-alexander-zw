@@ -58,15 +58,18 @@ def get_connected_components(frame):
     labeled_img[label_hue==0] = 0
     return ret, stats, labeled_img
 
-def find_and_show_hand_countour(binary_frame):
+def detect_hand_ellipse_hole(binary_frame, annotate=False):
     """
-    Tries to detect a contour in the hand gesture, and if detected displays an ellipse
-    matching the contour in a separate window.
+    Returns the ellipse center, major and minor axis lengths, angle, and annotated frame.
+    Tries to detect a hole in the hand gesture, and if detected returns the parameters of
+    an ellipse matching the contour. If annotate, display ellipse in a separate window.
     """
     ret, stats, labeled_img = get_connected_components(binary_frame)
     if ret <= 2:
         return binary_frame
-    frame = cv2.cvtColor(binary_frame, cv2.COLOR_GRAY2RGB) # Convert back to color
+    x, y, MA, ma, angle, frame = None, None, None, None, None, None
+    if annotate:
+        frame = cv2.cvtColor(binary_frame, cv2.COLOR_GRAY2RGB) # Convert back to color.
     try:
         stats_sorted_by_area = stats[np.argsort(stats[:, 4])]
         roi = stats_sorted_by_area[-3][0:4]
@@ -75,30 +78,35 @@ def find_and_show_hand_countour(binary_frame):
         subimg = cv2.cvtColor(subimg, cv2.COLOR_BGR2GRAY)
         contours, _ = cv2.findContours(subimg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         max_contour = max(contours, key=len)
-        cv2.fillPoly(frame, pts=[max_contour], color=[255,200,100]) # Fill largest contour with light blue.
-        if len(max_contour) >= 5:
-            ellipseParam = cv2.fitEllipse(max_contour)
-            subimg = cv2.cvtColor(subimg, cv2.COLOR_GRAY2RGB)
-            subimg = cv2.ellipse(subimg, ellipseParam, (0,max_color,0), 2) # Add green ellipse.
-        
-        subimg = cv2.resize(subimg, (0,0), fx=3, fy=3)
         (x,y), (MA,ma), angle = cv2.fitEllipse(max_contour)
         x, y, MA, ma, angle = round(x, 2), round(y, 2), round(MA, 2), round(ma, 2), round(angle, 2)
-        add_text_top_left(frame, f"({x}, {y}); axes {MA}, {ma}; angle {angle}")
-        imshow_smaller("ROI 2", subimg)
-    except:
-        add_text_top_left(frame, "No hand found")
-    return frame
 
-def add_convex_hull(binary_frame):
+        if annotate:
+            cv2.fillPoly(frame, pts=[max_contour], color=[255,200,100]) # Fill largest contour with light blue.
+            if len(max_contour) >= 5:
+                ellipseParam = cv2.fitEllipse(max_contour)
+                subimg = cv2.cvtColor(subimg, cv2.COLOR_GRAY2RGB)
+                subimg = cv2.ellipse(subimg, ellipseParam, (0,max_color,0), 2) # Add green ellipse.
+            subimg = cv2.resize(subimg, (0,0), fx=3, fy=3)
+            add_text_top_left(frame, f"({x}, {y}); axes {MA}, {ma}; angle {angle}")
+            imshow_smaller("ROI 2", subimg)
+    except:
+        if annotate:
+            add_text_top_left(frame, "No hand found")
+    return x, y, MA, ma, angle, frame
+
+def detect_fingers(binary_frame, annotate=False):
+    """ Returns number of fingers, area of hand, center of hand, and the annotated image. """
     contours, _ = cv2.findContours(binary_frame, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     contours = sorted(contours, key=cv2.contourArea, reverse=True)
     if len(contours) <= 1:
         return binary_frame
     largest_contour = contours[0]
     hull = cv2.convexHull(largest_contour, returnPoints = False)
-    frame = cv2.cvtColor(binary_frame, cv2.COLOR_GRAY2RGB) # Convert back to color
-    cv2.fillPoly(frame, pts=[largest_contour], color=[255,200,100]) # Fill largest contour with light blue.
+    frame = None
+    if annotate:
+        frame = cv2.cvtColor(binary_frame, cv2.COLOR_GRAY2RGB) # Convert back to color.
+        cv2.fillPoly(frame, pts=[largest_contour], color=[255,200,100]) # Fill largest contour with light blue.
     # Unless there are no fingers, the actual number is + 1 since we count valleys not fingers.
     finger_count = 1
     for cnt in contours[:1]:
@@ -111,20 +119,24 @@ def add_convex_hull(binary_frame):
                     end = tuple(cnt[e][0])
                     far = tuple(cnt[f][0])
 
-                    cv2.line(frame, start, end, [0,max_color,0], 2) # Green convex hull.
-                    cv2.circle(frame, far, 5, [0,200,max_color], -1) # Orange points.
+                    if annotate:
+                        cv2.line(frame, start, end, [0,max_color,0], 2) # Green convex hull.
+                        cv2.circle(frame, far, 5, [0,200,max_color], -1) # Orange points.
 
                     if is_finger(start, end, far):
                         finger_count += 1
-                        cv2.circle(frame, far, 4, [0,0,max_color], -1) # Red finger valley.
+                        if annotate:
+                            cv2.circle(frame, far, 4, [0,0,max_color], -1) # Red finger valley.
 
         except cv2.error:
             pass
     M = cv2.moments(largest_contour)
-    cX = int(M["m10"] / M["m00"])
-    cY = int(M["m01"] / M["m00"])
-    add_text_top_left(frame, f"({cX}, {cY}); {finger_count} fingers")
-    return frame
+    area = M["m00"]
+    cX = round(M["m10"] / area)
+    cY = round(M["m01"] / area)
+    if annotate:
+        add_text_top_left(frame, f"({cX}, {cY}); {finger_count} fingers")
+    return finger_count, area, cX, cY, frame
 
 def is_finger(start, end, far):
     c_squared = (end[0] - start[0])**2 + (end[1] - start[1])**2
@@ -154,10 +166,10 @@ if __name__ == "__main__":
 
         if DETECT_HOLE:
             _, binary_frame = threshold_binarize(frame, invert=True)
-            frame = find_and_show_hand_countour(binary_frame)
+            frame = detect_hand_ellipse_hole(binary_frame)
         else:
             _, binary_frame = threshold_binarize(frame, invert=False)
-            frame = add_convex_hull(binary_frame)
+            frame = detect_fingers(binary_frame, annotate=True)[-1]
 
         imshow_smaller(window_name, frame)
         k = cv2.waitKey(1) # k is the key pressed.
