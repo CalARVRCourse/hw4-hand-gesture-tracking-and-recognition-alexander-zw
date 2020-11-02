@@ -15,8 +15,14 @@ def imshow_smaller(title, img, scale=0.75):
     img_small = resize(img, scale=scale)
     cv2.imshow(title, img_small)
 
+def add_text(img, text, location, scale=1):
+    cv2.putText(img, text, location, cv2.FONT_HERSHEY_COMPLEX, scale, [max_color,0,max_color], thickness=3)
+
 def add_text_top_left(img, text, scale=1):
-    cv2.putText(img, text, (50, 50), cv2.FONT_HERSHEY_COMPLEX, scale, [max_color,0,max_color], thickness=3)
+    add_text(img, text, (50, 50), scale=scale)
+
+def add_text_bottom_left(img, text, scale=1):
+    add_text(img, text, (50, 670), scale=scale)
 
 def hsv_and_ycrcb_mask(frame):
     lower_HSV = np.array([0, 40, 0], dtype = "uint8")
@@ -60,14 +66,15 @@ def get_connected_components(frame):
 
 def detect_hand_ellipse_hole(binary_frame, annotate=False):
     """
-    Returns the ellipse center, major and minor axis lengths, angle, and annotated frame.
+    Returns the ellipse center, minor and major axis lengths, angle, and annotated frame.
     Tries to detect a hole in the hand gesture, and if detected returns the parameters of
-    an ellipse matching the contour. If annotate, display ellipse in a separate window.
+    an ellipse matching the contour. If no ellipse detected, returns 0 for all parameters.
+    If annotate, display ellipse in a separate window.
     """
     ret, stats, labeled_img = get_connected_components(binary_frame)
+    c_x, c_y, MA, ma, angle, frame = 0, 0, 0, 0, 0, binary_frame
     if ret <= 2:
-        return binary_frame
-    x, y, MA, ma, angle, frame = None, None, None, None, None, None
+        return c_x, c_y, MA, ma, angle, frame
     if annotate:
         frame = cv2.cvtColor(binary_frame, cv2.COLOR_GRAY2RGB) # Convert back to color.
     try:
@@ -78,37 +85,40 @@ def detect_hand_ellipse_hole(binary_frame, annotate=False):
         subimg = cv2.cvtColor(subimg, cv2.COLOR_BGR2GRAY)
         contours, _ = cv2.findContours(subimg, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         max_contour = max(contours, key=len)
-        (x,y), (MA,ma), angle = cv2.fitEllipse(max_contour)
-        x, y, MA, ma, angle = round(x, 2), round(y, 2), round(MA, 2), round(ma, 2), round(angle, 2)
+        (c_x,c_y), (MA,ma), angle = cv2.fitEllipse(max_contour)
+        c_x, c_y, MA, ma, angle = round(x + c_x), round(y + c_y), round(MA, 1), round(ma, 1), round(angle, 1)
 
         if annotate:
-            cv2.fillPoly(frame, pts=[max_contour], color=[255,200,100]) # Fill largest contour with light blue.
             if len(max_contour) >= 5:
                 ellipseParam = cv2.fitEllipse(max_contour)
                 subimg = cv2.cvtColor(subimg, cv2.COLOR_GRAY2RGB)
                 subimg = cv2.ellipse(subimg, ellipseParam, (0,max_color,0), 2) # Add green ellipse.
+            cv2.circle(frame, (c_x, c_y), 5, [max_color,0,max_color], -1) # Purple center.
             subimg = cv2.resize(subimg, (0,0), fx=3, fy=3)
-            add_text_top_left(frame, f"({x}, {y}); axes {MA}, {ma}; angle {angle}")
+            add_text_top_left(frame, f"({c_x}, {c_y}); axes {MA}, {ma}; angle {angle}")
+            add_text_bottom_left(frame, f"area {round(MA * ma)}; axis ratio {round(ma / MA, 3)}")
             imshow_smaller("ROI 2", subimg)
     except:
         if annotate:
             add_text_top_left(frame, "No hand found")
-    return x, y, MA, ma, angle, frame
+    return c_x, c_y, MA, ma, angle, frame
 
 def detect_fingers(binary_frame, annotate=False):
-    """ Returns number of fingers, area of hand, center of hand, and the annotated image. """
+    """
+    Returns number of fingers, area of hand, center of hand, and the annotated image.
+    If cannot detect hand, returns 1 for number of fingers and 0 for other parameters.
+    """
     contours, _ = cv2.findContours(binary_frame, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    finger_count, area, cX, cY, frame = 1, 0, 0, 0, binary_frame
     if len(contours) <= 1:
-        return binary_frame
-    largest_contour = contours[0]
+        return finger_count, area, cX, cY, frame
+    largest_contour = max(contours, key=cv2.contourArea)
     hull = cv2.convexHull(largest_contour, returnPoints = False)
-    frame = None
+    frame = binary_frame
     if annotate:
         frame = cv2.cvtColor(binary_frame, cv2.COLOR_GRAY2RGB) # Convert back to color.
         cv2.fillPoly(frame, pts=[largest_contour], color=[255,200,100]) # Fill largest contour with light blue.
     # Unless there are no fingers, the actual number is + 1 since we count valleys not fingers.
-    finger_count = 1
     for cnt in contours[:1]:
         try:
             defects = cv2.convexityDefects(cnt, hull)
@@ -135,7 +145,8 @@ def detect_fingers(binary_frame, annotate=False):
     cX = round(M["m10"] / area)
     cY = round(M["m01"] / area)
     if annotate:
-        add_text_top_left(frame, f"({cX}, {cY}); {finger_count} fingers")
+        cv2.circle(frame, (cX, cY), 5, [max_color,0,max_color], -1) # Purple center.
+        add_text_top_left(frame, f"({cX}, {cY}); {finger_count} fingers; area {area}")
     return finger_count, area, cX, cY, frame
 
 def is_finger(start, end, far):
@@ -148,7 +159,7 @@ def is_finger(start, end, far):
 
 window_name = "Hand Gesture Tracking"
 max_color = 255
-DETECT_HOLE = False # Used to switch between detecting hole and fingers.
+DETECT_HOLE = True # Used to switch between detecting hole and fingers.
 
 if __name__ == "__main__":
     cam = cv2.VideoCapture(0)
@@ -166,12 +177,13 @@ if __name__ == "__main__":
 
         if DETECT_HOLE:
             _, binary_frame = threshold_binarize(frame, invert=True)
-            frame = detect_hand_ellipse_hole(binary_frame)
+            frame = detect_hand_ellipse_hole(binary_frame, annotate=True)[-1]
         else:
             _, binary_frame = threshold_binarize(frame, invert=False)
             frame = detect_fingers(binary_frame, annotate=True)[-1]
 
         imshow_smaller(window_name, frame)
+
         k = cv2.waitKey(1) # k is the key pressed.
         if k == 27 or k == 113:  # 27, 113 are ascii for escape and q respectively.
             print("Received user input, exiting")
