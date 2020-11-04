@@ -1,4 +1,7 @@
-# HW4: Hand Gesture Tracking and Recognition 
+# HW4: Hand Gesture Tracking and Recognition
+
+This group consists of Josh Mao, Arjun Surap, and Alexander Wu.
+The video can be found [here](https://youtu.be/Ip1e8vPfAFM).
 
 For this homework you will be implementing hand gesture recognition and tracking using OpenCV. You will then use this to create custom gestures, and control keyboard and mouse actions. 
 
